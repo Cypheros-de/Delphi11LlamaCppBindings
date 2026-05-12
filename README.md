@@ -366,7 +366,7 @@ https://github.com/ggml-org/llama.cpp
 
 ## License
 
-MIT — see `LICENSE` for details.
+MIT — see `[LICENSE](https://github.com/Cypheros-de/Delphi11LlamaCppBindings/blob/main/LICENSE)` for details.
 
 ---
 
