@@ -294,6 +294,8 @@ end;
 It lets you load an image alongside a text prompt and have the model describe or answer
 questions about it.
 
+![VclVision sample — Cydonia-24B describing a line graph](images/png/Screenshot1.png)
+
 ### What you need
 
 | File            | Description                                               |
