@@ -15,8 +15,15 @@ Since the Embarcadero version included specific new features from Delphi 12+ for
 
 To use AI at a practical speed, accelerators such as GPUs and TPUs are required. Compared to current CPUs, GPUs are about 5 to 10 times faster. NVIDIA graphics cards are particularly well-suited for this purpose and are reasonably cost-effective when used with CUDA. Tested with a RTX4080 with 16GB VRAM via CUDA 13.
 
-The Cuda 13 version of Llama.cpp for RTX graphics cards can be found in the lib\win_x64_cuda_13 directory. If CUDA is not installed or not supported, the samples should fall back to the CPU. If you have another graphic card and need GPU support, replace the files in lib\win_x64_cuda_13 with the appropriate files from the Llama.cpp release page: [Release b9090 · ggml-org/llama.cpp · GitHub](https://github.com/ggml-org/llama.cpp/releases/tag/b9090)
-Or create a new folder and point the dll path of the samples to that folder.
+The CUDA 13 build of llama.cpp for RTX graphics cards belongs in `lib\win_x64_cuda_13`.
+Download the ZIP from the llama.cpp release page and extract its contents into that directory:
+
+**[llama-b9090-bin-win-cuda-13.1-x64.zip](https://github.com/ggml-org/llama.cpp/releases/download/b9090/llama-b9090-bin-win-cuda-13.1-x64.zip)**
+
+If CUDA is not installed or not supported, the samples fall back to the CPU automatically.
+For a different GPU or CUDA version, replace the files in `lib\win_x64_cuda_13` with the
+matching build from the [llama.cpp release page](https://github.com/ggml-org/llama.cpp/releases/tag/b9090),
+or create a new folder and adjust the DLL path in the sample's `initialization` section.
 
 ---
 
@@ -226,7 +233,7 @@ samples/
   SimpleChatWithDownload/    FMX sample with HuggingFace model download
 test/            DUnit test suite
 lib/
-  win_x64_cuda_13/    Pre-built DLLs (ggml-base, ggml-cpu, ggml-cuda, llama, …)
+  win_x64_cuda_13/    DLLs for CUDA 13 — extract llama-b9090-bin-win-cuda-13.1-x64.zip here
 ```
 
 ### Package installation (Delphi 11+)
@@ -236,6 +243,18 @@ lib/
 
 `dclLlamaCpp` depends on `LlamaCpp`, so the order matters.
 Delphi 12/13 will offer to migrate the project format on first open — accept.
+
+### DLL setup (CUDA 13)
+
+1. Download **[llama-b9090-bin-win-cuda-13.1-x64.zip](https://github.com/ggml-org/llama.cpp/releases/download/b9090/llama-b9090-bin-win-cuda-13.1-x64.zip)** from the llama.cpp releases.
+2. Extract the ZIP contents directly into `lib/win_x64_cuda_13/`.
+   The directory must contain at least `ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll`, `llama.dll`,
+   and `ggml-cuda.dll` (plus the CUDA runtime DLLs shipped in the ZIP).
+3. For vision support, `mtmd.dll` must also be present — it is included in the same ZIP.
+
+> For a different GPU or CUDA version, use the matching build from the
+> [llama.cpp release page](https://github.com/ggml-org/llama.cpp/releases/tag/b9090)
+> and adjust the DLL path in the sample's `initialization` section accordingly.
 
 ---
 
