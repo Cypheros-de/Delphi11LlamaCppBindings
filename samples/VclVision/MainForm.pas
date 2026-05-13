@@ -82,6 +82,8 @@ type
     FCurrentAnswer: string;
     FFirstTokenTime: TDateTime;
     FTokenCount: Integer;
+    FVramUsedMiB: Double; // GPU buffer MiB accumulated from load-time log messages
+    FCpuAllocMiB: Double; // CPU buffer MiB accumulated from load-time log messages
     procedure ScanDirectory(const ADir: string);
     procedure AppendChat(const AText: string);
     procedure AppendChatToken(const AToken: string);
@@ -102,6 +104,60 @@ uses
   LlamaCpp.Api.Llava;
 
 {$R *.dfm}
+
+// ---------------------------------------------------------------------------
+// NVML helper — queries live VRAM from nvidia-ml (optional, GPU 0 only)
+// ---------------------------------------------------------------------------
+
+type
+  TNvmlDevice = Pointer;
+  TNvmlMemory = record
+    Total: UInt64; // bytes
+    Free:  UInt64; // bytes
+    Used:  UInt64; // bytes
+  end;
+  TNvmlInitFn   = function: Integer; cdecl;
+  TNvmlGetHndFn = function(Idx: Cardinal; out Dev: TNvmlDevice): Integer; cdecl;
+  TNvmlGetMemFn = function(Dev: TNvmlDevice; out Mem: TNvmlMemory): Integer; cdecl;
+  TNvmlShutdnFn = function: Integer; cdecl;
+
+function QueryNvmlVramMiB(out AUsedMiB, AFreeMiB: UInt64): Boolean;
+var
+  LLib:    THandle;
+  LInit:   TNvmlInitFn;
+  LGetHnd: TNvmlGetHndFn;
+  LGetMem: TNvmlGetMemFn;
+  LShutdn: TNvmlShutdnFn;
+  LDev:    TNvmlDevice;
+  LMem:    TNvmlMemory;
+begin
+  Result   := False;
+  AUsedMiB := 0;
+  AFreeMiB := 0;
+  LLib := Winapi.Windows.LoadLibrary('nvml.dll');
+  if LLib = 0 then Exit;
+  try
+    @LInit   := Winapi.Windows.GetProcAddress(LLib, 'nvmlInit_v2');
+    @LGetHnd := Winapi.Windows.GetProcAddress(LLib, 'nvmlDeviceGetHandleByIndex_v2');
+    @LGetMem := Winapi.Windows.GetProcAddress(LLib, 'nvmlDeviceGetMemoryInfo');
+    @LShutdn := Winapi.Windows.GetProcAddress(LLib, 'nvmlShutdown');
+    if Assigned(LInit) and Assigned(LGetHnd) and Assigned(LGetMem) and
+       (LInit() = 0) then
+    try
+      LDev := nil;
+      if (LGetHnd(0, LDev) = 0) and (LGetMem(LDev, LMem) = 0) then
+      begin
+        AUsedMiB := LMem.Used shr 20;
+        AFreeMiB := LMem.Free shr 20;
+        Result   := True;
+      end;
+    finally
+      if Assigned(LShutdn) then LShutdn();
+    end;
+  finally
+    Winapi.Windows.FreeLibrary(LLib);
+  end;
+end;
 
 // ---------------------------------------------------------------------------
 // EOG token strings for common vision-capable models
@@ -337,6 +393,9 @@ begin
   sbStatus.Panels[0].Text := 'Loading: ' + TPath.GetFileName(APath);
   sbStatus.Panels[1].Text := 'Loading model...';
   sbStatus.Panels[2].Text := '';
+  sbStatus.Panels[3].Text := '';
+  FVramUsedMiB            := 0;
+  FCpuAllocMiB            := 0;
 
   LThread := TThread.CreateAnonymousThread(procedure
   var
@@ -386,6 +445,8 @@ begin
     end;
 
     TThread.Queue(nil, procedure
+    var
+      LVramUsed, LVramFree: UInt64;
     begin
       FLoading := False;
 
@@ -397,6 +458,15 @@ begin
         btnLoad.Caption  := 'Reload';
         sbStatus.Panels[0].Text := TPath.GetFileNameWithoutExtension(APath);
         sbStatus.Panels[1].Text := 'Ready';
+        if QueryNvmlVramMiB(LVramUsed, LVramFree) then
+          sbStatus.Panels[3].Text :=
+            Format('VRAM: %d MiB used, %d MiB free', [Int64(LVramUsed), Int64(LVramFree)])
+        else if FVramUsedMiB > 0 then
+          sbStatus.Panels[3].Text :=
+            Format('GPU: %.0f MiB', [FVramUsedMiB])
+        else if FCpuAllocMiB > 0 then
+          sbStatus.Panels[3].Text :=
+            Format('CPU: %.0f MiB', [FCpuAllocMiB]);
         memChat.Clear;
         AppendChat('=== ' + TPath.GetFileName(APath) + ' ===');
         AppendChat('System: ' + memSystemPrompt.Lines.Text.Trim);
@@ -904,11 +974,46 @@ procedure TFormMain.Llama1Log(Sender: TObject; const ALevel: TGgmlLogLevel;
   const AText: string);
 var
   LText: string;
+  LPos, LNumStart: Integer;
+  LNumStr: string;
+  LMiB: Double;
+  LFS: TFormatSettings;
 begin
-  if ALevel < GGML_LOG_LEVEL_WARN then
-    Exit;
   LText := AText.Trim;
   if LText.IsEmpty then
+    Exit;
+
+  // Accumulate GPU/CPU allocation from llama.cpp load messages (any log level).
+  // Patterns: "llm_load_tensors:  CUDA[N] buffer size =  1234.56 MiB"
+  //           "llm_load_tensors:        CPU buffer size =   274.83 MiB"
+  if Pos('buffer size', LText) > 0 then
+  begin
+    LPos := Pos('=', LText);
+    if LPos > 0 then
+    begin
+      LNumStart := LPos + 1;
+      while (LNumStart <= Length(LText)) and (LText[LNumStart] = ' ') do
+        Inc(LNumStart);
+      LNumStr := '';
+      while (LNumStart <= Length(LText)) and
+            CharInSet(LText[LNumStart], ['0'..'9', '.']) do
+      begin
+        LNumStr := LNumStr + LText[LNumStart];
+        Inc(LNumStart);
+      end;
+      LFS := TFormatSettings.Create;
+      LFS.DecimalSeparator := '.';
+      if TryStrToFloat(LNumStr, LMiB, LFS) then
+      begin
+        if Pos('CUDA', LText) > 0 then
+          FVramUsedMiB := FVramUsedMiB + LMiB
+        else if Pos('CPU', LText) > 0 then
+          FCpuAllocMiB := FCpuAllocMiB + LMiB;
+      end;
+    end;
+  end;
+
+  if ALevel < GGML_LOG_LEVEL_WARN then
     Exit;
   TThread.Queue(nil, procedure
   begin

@@ -35,6 +35,9 @@ object FormMain: TFormMain
       end
       item
         Width = 120
+      end
+      item
+        Width = 180
       end>
   end
   object pnlTop: TPanel
@@ -51,7 +54,7 @@ object FormMain: TFormMain
     object lblDir: TLabel
       Left = 8
       Top = 13
-      Width = 98
+      Width = 87
       Height = 15
       Caption = 'Model directory:'
     end
@@ -148,21 +151,21 @@ object FormMain: TFormMain
         object lblSystemPrompt: TLabel
           Left = 8
           Top = 18
-          Width = 86
+          Width = 84
           Height = 15
           Caption = 'System prompt:'
         end
         object lblGpuLayers: TLabel
           Left = 8
           Top = 108
-          Width = 83
+          Width = 59
           Height = 15
           Caption = 'GPU layers:'
         end
         object lblCtx: TLabel
           Left = 148
           Top = 108
-          Width = 43
+          Width = 44
           Height = 15
           Caption = 'Context:'
         end

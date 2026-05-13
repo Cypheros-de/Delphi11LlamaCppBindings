@@ -35,6 +35,9 @@ object FormMain: TFormMain
       end
       item
         Width = 120
+      end
+      item
+        Width = 180
       end>
   end
   object pnlTop: TPanel
@@ -51,7 +54,7 @@ object FormMain: TFormMain
     object lblDir: TLabel
       Left = 8
       Top = 13
-      Width = 98
+      Width = 87
       Height = 15
       Caption = 'Model directory:'
     end
@@ -148,28 +151,28 @@ object FormMain: TFormMain
         object lblSystemPrompt: TLabel
           Left = 8
           Top = 18
-          Width = 86
+          Width = 84
           Height = 15
           Caption = 'System prompt:'
         end
         object lblGpuLayers: TLabel
           Left = 8
           Top = 108
-          Width = 83
+          Width = 59
           Height = 15
           Caption = 'GPU layers:'
         end
         object lblCtx: TLabel
           Left = 148
           Top = 108
-          Width = 43
+          Width = 44
           Height = 15
           Caption = 'Context:'
         end
         object lblMmproj: TLabel
           Left = 8
           Top = 144
-          Width = 73
+          Width = 65
           Height = 15
           Caption = 'mmproj file:'
         end
@@ -180,7 +183,9 @@ object FormMain: TFormMain
           Height = 58
           Anchors = [akLeft, akTop, akRight]
           Lines.Strings = (
-            'You are a helpful assistant. Describe images accurately and answer questions about them.')
+            
+              'You are a helpful assistant. Describe images accurately and answ' +
+              'er questions about them.')
           ScrollBars = ssVertical
           TabOrder = 0
         end
@@ -277,7 +282,6 @@ object FormMain: TFormMain
       Height = 150
       Align = alTop
       BevelOuter = bvNone
-      Caption = ''
       TabOrder = 1
       object imgPreview: TImage
         Left = 8
@@ -290,7 +294,7 @@ object FormMain: TFormMain
       object lblImageInfo: TLabel
         Left = 196
         Top = 8
-        Width = 200
+        Width = 98
         Height = 15
         Caption = 'No image selected'
       end
@@ -424,9 +428,9 @@ object FormMain: TFormMain
     Top = 112
   end
   object dlgOpenImage: TOpenDialog
-    Filter =
-      'Image files (*.jpg;*.jpeg;*.png;*.bmp)|*.jpg;*.jpeg;*.png;*.bm' +
-      'p|All files (*.*)|*.*'
+    Filter = 
+      'Image files (*.jpg;*.jpeg;*.png;*.bmp)|*.jpg;*.jpeg;*.png;*.bmp|' +
+      'All files (*.*)|*.*'
     Options = [ofHideReadOnly, ofFileMustExist, ofEnableSizing]
     Left = 800
     Top = 168
