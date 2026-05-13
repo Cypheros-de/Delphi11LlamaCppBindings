@@ -1,4 +1,4 @@
-# llama-cpp-delphi — Updated for llama.cpp [b9090]() · Delphi 11+
+# llama-cpp-delphi — Updated for llama.cpp b9090 · Delphi 11+
 
 > **Based on the original work by Lucas Moura Belo (lmbelo) for Embarcadero:**
 > [github.com/Embarcadero/llama-cpp-delphi](https://github.com/Embarcadero/llama-cpp-delphi)
@@ -335,7 +335,7 @@ The sample uses the `mtmd` API introduced in llama.cpp b9050:
 
 The settings panel exposes the same knobs as VclChat (GPU layers, context size,
 Flash Attention, Q8_0 KV cache, KQV offload). The mmproj path is a separate field;
-both the text model and the mmproj are loaded together when **Modell laden** is clicked.
+both the text model and the mmproj are loaded together when **Load** is clicked.
 
 ---
 
