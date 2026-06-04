@@ -1007,7 +1007,7 @@ function TLlama.CreateChatCompletion(
   const ALogitsProcessor: ILogitsProcessorList;
   const AGrammar: ILlamaGrammar): TCreateChatCompletionResponse;
 begin
-  (FLlamaBase as ILlamaChatCompletion).CreateChatCompletion(
+  Result := (FLlamaBase as ILlamaChatCompletion).CreateChatCompletion(
     ASettings, AStoppingCriteria, ALogitsProcessor);
 end;
 
