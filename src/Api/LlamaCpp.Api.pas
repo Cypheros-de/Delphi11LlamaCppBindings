@@ -121,8 +121,11 @@ end;
 
 class function TLlamaCppApis.VisionAvailable: Boolean;
 begin
+  // mtmd_helper_init_opt_default marks the b11900 signature of
+  // mtmd_helper_bitmap_init_from_file; older DLLs use an incompatible one.
   Result := Assigned(TLlavaApi.Instance.mtmd_init_from_file) and
-            Assigned(TLlavaApi.Instance.mtmd_helper_eval_chunks);
+            Assigned(TLlavaApi.Instance.mtmd_helper_eval_chunks) and
+            Assigned(TLlavaApi.Instance.mtmd_helper_init_opt_default);
 end;
 
 class function TLlamaCppApis.Warnings: TArray<string>;
@@ -141,6 +144,10 @@ begin
   if Assigned(TLlavaApi.Instance.mtmd_init_from_file) and
      not Assigned(TLlavaApi.Instance.mtmd_helper_eval_chunks) then
     Result := Result + ['mtmd.dll: mtmd_helper_eval_chunks missing (requires b9050+)'];
+  if Assigned(TLlavaApi.Instance.mtmd_init_from_file) and
+     not Assigned(TLlavaApi.Instance.mtmd_helper_init_opt_default) then
+    Result := Result + ['mtmd.dll: mtmd_helper_init_opt_default missing — ' +
+      'mtmd_helper_bitmap_init_from_file has an incompatible signature (requires b11900+)'];
 end;
 
 class procedure TLlamaCppApis.LoadAll(ALibDir: string);

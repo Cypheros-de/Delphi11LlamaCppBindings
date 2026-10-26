@@ -100,6 +100,7 @@ implementation
 
 uses
   LlamaCpp.Api,
+  LlamaCpp.Api.Llama,
   LlamaCpp.CType.Llava,
   LlamaCpp.Api.Llava;
 
@@ -172,7 +173,66 @@ begin
     (AText = '<|endoftext|>') or
     (AText = '<eos>') or
     (AText = '<end_of_turn>') or
-    (AText = '<|end|>');
+    (AText = '<|end|>') or
+    (AText = '<end_of_utterance>');
+end;
+
+// ---------------------------------------------------------------------------
+// Prompt formatting with the model's built-in chat template
+// ---------------------------------------------------------------------------
+
+// Formats a single-turn prompt with the model's built-in chat template;
+// falls back to a plain USER/ASSISTANT layout if the model has none.
+function BuildChatPrompt(AModel: PLlamaModel;
+  const ASystemPrompt, AUserText: string): string;
+var
+  LTemplate: PAnsiChar;
+  LRoles: array [0..1] of UTF8String;
+  LContents: array [0..1] of UTF8String;
+  LMessages: array [0..1] of TLlamaChatMessage;
+  LCount: Integer;
+  LBufSize: Integer;
+  LBuf: TArray<AnsiChar>;
+  I: Integer;
+begin
+  LTemplate := TLlamaApi.Instance.llama_model_chat_template(AModel, nil);
+  if LTemplate <> nil then
+  begin
+    LCount := 0;
+    if not ASystemPrompt.IsEmpty then
+    begin
+      LRoles[LCount]    := 'system';
+      LContents[LCount] := UTF8String(ASystemPrompt);
+      Inc(LCount);
+    end;
+    LRoles[LCount]    := 'user';
+    LContents[LCount] := UTF8String(AUserText);
+    Inc(LCount);
+    for I := 0 to LCount - 1 do
+    begin
+      LMessages[I].Role    := PAnsiChar(LRoles[I]);
+      LMessages[I].Content := PAnsiChar(LContents[I]);
+    end;
+
+    // First pass measures, second pass fills (result is UTF-8)
+    LBufSize := TLlamaApi.Instance.llama_chat_apply_template(
+      LTemplate, @LMessages[0], LCount, True, nil, 0);
+    if LBufSize > 0 then
+    begin
+      SetLength(LBuf, LBufSize + 1);
+      TLlamaApi.Instance.llama_chat_apply_template(
+        LTemplate, @LMessages[0], LCount, True, @LBuf[0], LBufSize);
+      LBuf[LBufSize] := #0;
+      Exit(UTF8ToString(PAnsiChar(@LBuf[0])));
+    end;
+  end;
+
+  // Template missing or not supported by llama_chat_apply_template
+  if ASystemPrompt.IsEmpty then
+    Result := 'USER: ' + AUserText + #10 + 'ASSISTANT:'
+  else
+    Result := 'SYSTEM: ' + ASystemPrompt + #10 +
+      'USER: ' + AUserText + #10 + 'ASSISTANT:';
 end;
 
 // ---------------------------------------------------------------------------
@@ -361,10 +421,10 @@ begin
     ShowMessage('mmproj file not found:' + sLineBreak + LMmprojPath);
     Exit;
   end;
-  if not Assigned(TLlavaApi.Instance.mtmd_init_from_file) then
+  if not TLlamaCppApis.VisionAvailable then
   begin
     ShowMessage('mtmd.dll not loaded or too old.' + sLineBreak +
-      'Please copy mtmd.dll (llama.cpp b9050+) to the DLL directory.');
+      'Please copy mtmd.dll (llama.cpp b11900+) to the DLL directory.');
     Exit;
   end;
 
@@ -623,10 +683,7 @@ begin
     memChat.Lines[LLast] := memChat.Lines[LLast] + LParts[0];
 
     for I := 1 to High(LParts) do
-    begin
       memChat.Lines.Add(LParts[I]);
-      Inc(LLast);
-    end;
   finally
     memChat.Lines.EndUpdate;
   end;
@@ -685,7 +742,9 @@ begin
   LThread := TThread.CreateAnonymousThread(procedure
   var
     LErr: string;
+    LBitmapWrapper: TMtmdHelperBitmapWrapper;
     LBitmap: PMtmdBitmap;
+    LVideoCtx: PMtmdHelperVideo;
     LChunks: PMtmdInputChunks;
     LInputText: TMtmdInputText;
     LInputTextUtf8: UTF8String;
@@ -697,10 +756,13 @@ begin
     LSamplerSettings: TLlamaSamplerSettings;
     LPreBytes: TBytes;
     LPreTokens: TArray<Integer>;
+    LVocab: PLlamaVocab;
   begin
-    LErr     := '';
-    LBitmap  := nil;
-    LChunks  := nil;
+    LVocab    := TLlamaApi.Instance.llama_model_get_vocab(Llama1.LlamaModel);
+    LErr      := '';
+    LBitmap   := nil;
+    LVideoCtx := nil;
+    LChunks   := nil;
     try
       // Reset KV cache for this single-shot generation
       Llama1.NumberOfTokens := 0;
@@ -715,10 +777,13 @@ begin
         SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide,
           exOverflow, exUnderflow, exPrecision]);
         try
-          // Load image as bitmap
+          // Load image as bitmap (b11900: returns a wrapper record)
           LImagePathA := AnsiString(LCapturedImagePath);
-          LBitmap := TLlavaApi.Instance.mtmd_helper_bitmap_init_from_file(
-            FMtmdCtx, PAnsiChar(LImagePathA));
+          LBitmapWrapper := TLlavaApi.Instance.mtmd_helper_bitmap_init_from_file(
+            FMtmdCtx, PAnsiChar(LImagePathA), False,
+            TLlavaApi.Instance.mtmd_helper_init_opt_default());
+          LBitmap   := LBitmapWrapper.Bitmap;
+          LVideoCtx := LBitmapWrapper.VideoCtx;
         finally
           SetExceptionMask(LSavedMask);
         end;
@@ -733,17 +798,13 @@ begin
         else
           LMarkerStr := '<__media__>';
 
-        // Build prompt: system + image marker + question + assistant tag
-        // UTF8String ensures correct encoding for non-ASCII characters
-        if LSystemPrompt.IsEmpty then
-          LInputTextUtf8 := UTF8String('USER: ' + LMarkerStr +
-            #10 + LQuestion + #10 + 'ASSISTANT:')
-        else
-          LInputTextUtf8 := UTF8String('SYSTEM: ' + LSystemPrompt +
-            #10 + 'USER: ' + LMarkerStr +
-            #10 + LQuestion + #10 + 'ASSISTANT:');
+        // Build prompt with the model's chat template: the image marker goes
+        // into the user message. UTF8String keeps non-ASCII text intact.
+        LInputTextUtf8 := UTF8String(BuildChatPrompt(Llama1.LlamaModel,
+          LSystemPrompt, LMarkerStr + #10 + LQuestion));
 
         LInputText.Text         := PAnsiChar(LInputTextUtf8);
+        LInputText.TextLen      := Length(LInputTextUtf8);
         LInputText.AddSpecial   := True;
         LInputText.ParseSpecial := True;
 
@@ -813,7 +874,8 @@ begin
             LPiece := Llama1.Detokenize([AToken], nil, True);
             LText  := TEncoding.UTF8.GetString(LPiece);
 
-            if IsEogText(LText) then
+            if TLlamaApi.Instance.llama_vocab_is_eog(LVocab, AToken) or
+               IsEogText(LText) then
             begin
               AContinue := False;
               Exit;
@@ -836,12 +898,8 @@ begin
 
       end else begin
         // --- Text-only path (no image selected) ---
-        if LSystemPrompt.IsEmpty then
-          LPreBytes := TEncoding.UTF8.GetBytes('USER: ' + LQuestion +
-            #10 + 'ASSISTANT:')
-        else
-          LPreBytes := TEncoding.UTF8.GetBytes('SYSTEM: ' + LSystemPrompt +
-            #10 + 'USER: ' + LQuestion + #10 + 'ASSISTANT:');
+        LPreBytes := TEncoding.UTF8.GetBytes(
+          BuildChatPrompt(Llama1.LlamaModel, LSystemPrompt, LQuestion));
 
         LPreTokens := Llama1.Tokenize(LPreBytes, True, True);
         Llama1.Eval(LPreTokens);
@@ -865,7 +923,8 @@ begin
             LPiece := Llama1.Detokenize([AToken], nil, True);
             LText  := TEncoding.UTF8.GetString(LPiece);
 
-            if IsEogText(LText) then
+            if TLlamaApi.Instance.llama_vocab_is_eog(LVocab, AToken) or
+               IsEogText(LText) then
             begin
               AContinue := False;
               Exit;
@@ -901,6 +960,20 @@ begin
       try
         if Assigned(TLlavaApi.Instance.mtmd_bitmap_free) then
           TLlavaApi.Instance.mtmd_bitmap_free(LBitmap);
+      finally
+        SetExceptionMask(LSavedMask);
+      end;
+    end;
+
+    // Only set for video input; freed for completeness
+    if LVideoCtx <> nil then
+    begin
+      LSavedMask := GetExceptionMask;
+      SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide,
+        exOverflow, exUnderflow, exPrecision]);
+      try
+        if Assigned(TLlavaApi.Instance.mtmd_helper_video_free) then
+          TLlavaApi.Instance.mtmd_helper_video_free(LVideoCtx);
       finally
         SetExceptionMask(LSavedMask);
       end;
@@ -1013,7 +1086,8 @@ begin
     end;
   end;
 
-  if ALevel < GGML_LOG_LEVEL_WARN then
+  // CONT carries progress dots during model load, not warnings
+  if (ALevel < GGML_LOG_LEVEL_WARN) or (ALevel = GGML_LOG_LEVEL_CONT) then
     Exit;
   TThread.Queue(nil, procedure
   begin

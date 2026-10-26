@@ -208,7 +208,7 @@ type
       ASampler: PLlamaSampler); cdecl;
     TLlamaSamplerChainGet = function(const AChain: PLlamaSampler; AIndex: Int32)
       : PLlamaSampler; cdecl;
-    TLlamaSamplerChainN = function(const AChain: PLlamaSampler): Integer; cdecl;
+    TLlamaSamplerChainN = function(const AChain: PLlamaSampler): Int32; cdecl;
     TLlamaSamplerChainRemove = function(AChain: PLlamaSampler; AIndex: Int32)
       : PLlamaSampler; cdecl;
     TLlamaSamplerInitGreedy = function: PLlamaSampler; cdecl;
@@ -233,11 +233,13 @@ type
     TLlamaSamplerInitGrammar = function(const AVocab: PLlamaVocab;
       const AGrammarStr: PAnsiChar; const AGrammarRoot: PAnsiChar)
       : PLlamaSampler; cdecl;
-    TLlamaSamplerInitPenalties = function(APenaltyLastN: Int32;
+    // b11900: n_vocab added; penalty_last_n = 0 disables, -1 is no longer allowed
+    TLlamaSamplerInitPenalties = function(ANVocab: Int32; APenaltyLastN: Int32;
       APenaltyRepeat: Single; APenaltyFreq: Single; APenaltyPresent: Single)
       : PLlamaSampler; cdecl;
+    // b11900: n_ctx_train removed; at most 64 sequence breakers
     TLlamaSamplerInitDry = function(const AVocab: PLlamaVocab;
-      ANCtxTrain: Int32; ADryMultiplier: Single; ADryBase: Single;
+      ADryMultiplier: Single; ADryBase: Single;
       ADryAllowedLength: Int32; ADryPenaltyLastN: Int32;
       ASeqBreakers: PPAnsiChar; ANumBreakers: NativeUInt)
       : PLlamaSampler; cdecl;
@@ -254,6 +256,7 @@ type
     TLlamaSplitPrefix = function(ASplitPrefix: PAnsiChar; AMaxLen: NativeUInt;
       ASplitPath: PAnsiChar; ASplitNo: Int32; ASplitCount: Int32): Int32; cdecl;
     TLlamaPrintSystemInfo = function: PAnsiChar; cdecl;
+    TLlamaVersion = function: PAnsiChar; cdecl;
     TLlamaLogSet = procedure(ALogCallback: TGGMLLogCallback;
       AUserData: Pointer); cdecl;
     TLlamaPerfContext = function(const AContext: PLlamaContext)
@@ -416,6 +419,8 @@ type
     llama_split_path: TLlamaSplitPath;
     llama_split_prefix: TLlamaSplitPrefix;
     llama_print_system_info: TLlamaPrintSystemInfo;
+    // b11900+: version string of the build; nil with older DLLs
+    llama_version: TLlamaVersion;
     llama_log_set: TLlamaLogSet;
     llama_perf_context: TLlamaPerfContext;
     llama_perf_context_print: TLlamaPerfContextPrint;
@@ -643,6 +648,7 @@ begin
   @llama_split_prefix := GetProcAddress(ALibAddr, 'llama_split_prefix');
   @llama_print_system_info := GetProcAddress(ALibAddr,
     'llama_print_system_info');
+  @llama_version := GetProcAddress(ALibAddr, 'llama_version');
   @llama_log_set := GetProcAddress(ALibAddr, 'llama_log_set');
   @llama_perf_context := GetProcAddress(ALibAddr, 'llama_perf_context');
   @llama_perf_context_print := GetProcAddress(ALibAddr,

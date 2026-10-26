@@ -1,6 +1,6 @@
 unit LlamaCpp.Api.Llava;
 
-// Delphi bindings for mtmd.dll (llama.cpp b9050+).
+// Delphi bindings for mtmd.dll (llama.cpp b11900).
 // Corresponds to mtmd.h and mtmd-helper.h in the llama.cpp source tree.
 
 interface
@@ -79,9 +79,17 @@ type
       const ABitmaps: PPMtmdBitmap;
       ANBitmaps: NativeUInt): Int32; cdecl;
 
-    // mtmd_helper_bitmap_init_from_file(ctx, fname) -> bitmap or nil
+    // mtmd_helper_init_opt_default() -> default options for mtmd_helper_bitmap_init_from_*
+    TMtmdHelperInitOptDefault = function(): TMtmdHelperInitOpt; cdecl;
+
+    // mtmd_helper_bitmap_init_from_file(ctx, fname, placeholder, opt) -> wrapper;
+    // wrapper.Bitmap is nil on failure, wrapper.VideoCtx is only set for video input
     TMtmdHelperBitmapInitFromFile = function(ACtx: PMtmdContext;
-      const AFileName: PAnsiChar): PMtmdBitmap; cdecl;
+      const AFileName: PAnsiChar; APlaceholder: Boolean;
+      const AOpt: TMtmdHelperInitOpt): TMtmdHelperBitmapWrapper; cdecl;
+
+    // mtmd_helper_video_free(video_ctx)
+    TMtmdHelperVideoFree = procedure(AVideoCtx: PMtmdHelperVideo); cdecl;
 
     // mtmd_helper_get_n_tokens(chunks) -> total token count
     TMtmdHelperGetNTokens = function(AChunks: PMtmdInputChunks)
@@ -123,7 +131,9 @@ type
     mtmd_input_chunk_get_n_tokens: TMtmdInputChunkGetNTokens;
     mtmd_input_chunk_get_n_pos: TMtmdInputChunkGetNPos;
     mtmd_tokenize: TMtmdTokenize;
+    mtmd_helper_init_opt_default: TMtmdHelperInitOptDefault;
     mtmd_helper_bitmap_init_from_file: TMtmdHelperBitmapInitFromFile;
+    mtmd_helper_video_free: TMtmdHelperVideoFree;
     mtmd_helper_get_n_tokens: TMtmdHelperGetNTokens;
     mtmd_helper_get_n_pos: TMtmdHelperGetNPos;
     mtmd_helper_eval_chunks: TMtmdHelperEvalChunks;
@@ -170,8 +180,11 @@ begin
   @mtmd_input_chunk_get_n_pos := GetProcAddress(ALibAddr,
     'mtmd_input_chunk_get_n_pos');
   @mtmd_tokenize := GetProcAddress(ALibAddr, 'mtmd_tokenize');
+  @mtmd_helper_init_opt_default := GetProcAddress(ALibAddr,
+    'mtmd_helper_init_opt_default');
   @mtmd_helper_bitmap_init_from_file := GetProcAddress(ALibAddr,
     'mtmd_helper_bitmap_init_from_file');
+  @mtmd_helper_video_free := GetProcAddress(ALibAddr, 'mtmd_helper_video_free');
   @mtmd_helper_get_n_tokens := GetProcAddress(ALibAddr,
     'mtmd_helper_get_n_tokens');
   @mtmd_helper_get_n_pos := GetProcAddress(ALibAddr, 'mtmd_helper_get_n_pos');

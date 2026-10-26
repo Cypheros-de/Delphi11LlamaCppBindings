@@ -36,7 +36,7 @@ type
     procedure AddMirostat(NVocab: Integer; Seed: Integer; Tau, Eta: Single; M: Integer);
     procedure AddMirostatV2(Seed: Integer; Tau, Eta: Single);
     procedure AddGrammar(Model: TLlamaModel; Grammar: ILlamaGrammar);
-    procedure AddPenalties(
+    procedure AddPenalties(NVocab: Integer;
       PenaltyLastN: Integer;
       PenaltyRepeat, PenaltyFreq, PenaltyPresent: Single);
     procedure InitLogitBias(
@@ -172,14 +172,17 @@ begin
   AddSampler(Sampler);
 end;
 
-procedure TLlamaSampler.AddPenalties(
+procedure TLlamaSampler.AddPenalties(NVocab: Integer;
   PenaltyLastN: Integer;
   PenaltyRepeat, PenaltyFreq, PenaltyPresent: Single);
 var
   Sampler: PLlamaSampler;
 begin
+  // Since b11900 -1 ("context size") is rejected; 0 disables the penalty.
+  if PenaltyLastN < 0 then
+    PenaltyLastN := 0;
   Sampler := TLlamaApi.Instance.llama_sampler_init_penalties(
-    PenaltyLastN, PenaltyRepeat, PenaltyFreq, PenaltyPresent);
+    NVocab, PenaltyLastN, PenaltyRepeat, PenaltyFreq, PenaltyPresent);
   AddSampler(Sampler);
 end;
 

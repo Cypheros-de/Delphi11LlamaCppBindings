@@ -73,7 +73,10 @@ type
     LLAMA_VOCAB_TYPE_BPE  = 2, // GPT-2 tokenizer based on byte-level BPE
     LLAMA_VOCAB_TYPE_WPM  = 3, // BERT tokenizer based on WordPiece
     LLAMA_VOCAB_TYPE_UGM  = 4, // T5 tokenizer based on Unigram
-    LLAMA_VOCAB_TYPE_RWKV = 5  // RWKV tokenizer based on greedy tokenization
+    LLAMA_VOCAB_TYPE_RWKV = 5, // RWKV tokenizer based on greedy tokenization
+    LLAMA_VOCAB_TYPE_PLAMO2 = 6, // PLaMo-2 tokenizer based on Aho-Corasick with dynamic programming
+    LLAMA_VOCAB_TYPE_TEST   = 7, // Dummy tokenizer for testing
+    LLAMA_VOCAB_TYPE_PLAMO3 = 8  // PLaMo-3 tokenizer with pre-segmentation and dynamic programming
   );
 
   TLlamaVocabPreType = (
@@ -175,8 +178,35 @@ type
     LLAMA_FTYPE_MOSTLY_Q4_0_8_8      = 35,  // Except 1D tensors
     LLAMA_FTYPE_MOSTLY_TQ1_0         = 36,  // Except 1D tensors
     LLAMA_FTYPE_MOSTLY_TQ2_0         = 37,  // Except 1D tensors
+    LLAMA_FTYPE_MOSTLY_MXFP4_MOE     = 38,  // Except 1D tensors
+    LLAMA_FTYPE_MOSTLY_NVFP4         = 39,  // Except 1D tensors
+    LLAMA_FTYPE_MOSTLY_Q1_0          = 40,  // Except 1D tensors
+    LLAMA_FTYPE_MOSTLY_Q2_0          = 41,  // Except 1D tensors
 
     LLAMA_FTYPE_GUESSED              = 1024 // Not specified in the model file
+  );
+
+  // How the model weights are loaded (replaces use_mmap/use_mlock/use_direct_io, b11900)
+  TLlamaLoadMode = (
+    LLAMA_LOAD_MODE_AUTO       = -1,
+    LLAMA_LOAD_MODE_NONE       = 0,
+    LLAMA_LOAD_MODE_MMAP       = 1,
+    LLAMA_LOAD_MODE_MLOCK      = 2,
+    LLAMA_LOAD_MODE_MMAP_MLOCK = 3,
+    LLAMA_LOAD_MODE_DIRECT_IO  = 4
+  );
+
+  // On-demand reading of tensors marked by the architecture (b11900)
+  TLlamaLazyMode = (
+    LLAMA_LAZY_MODE_OFF  = 0,
+    LLAMA_LAZY_MODE_AUTO = 1,
+    LLAMA_LAZY_MODE_ON   = 2
+  );
+
+  // Context type, e.g. a context for MTP layers (b11900)
+  TLlamaContextType = (
+    LLAMA_CONTEXT_TYPE_DEFAULT = 0,
+    LLAMA_CONTEXT_TYPE_MTP     = 1
   );
 
   TLlamaRopeScalingType = (
@@ -286,86 +316,101 @@ type
   PTLlamaModelKVOverrideArray = ^TLlamaModelKVOverrideArray;
   TLlamaModelKVOverrideArray = array[0..0] of TLlamaModelKVOverride;
 
+  // struct llama_model_params (b11900), 80 bytes
   TLlamaModelParams = record
     Devices: Pointer;                         // NULL-terminated list of devices for offloading (+0)
     TensorBuftOverrides: Pointer;             // NULL-terminated buffer-type overrides per tensor pattern (+8)
-    NGpuLayers: Int32;                        // Number of layers to store in VRAM (+16)
+    NGpuLayers: Int32;                        // Number of layers to store in VRAM, -1 = all (+16)
     SplitMode: TLlamaSplitMode;               // Split mode for multiple GPUs (+20)
-    MainGpu: Int32;                           // GPU used for the entire model in LLAMA_SPLIT_MODE_NONE (+24)
+    LoadMode: TLlamaLoadMode;                 // How to load the model (mmap, mlock, direct I/O) (+24)
+    LazyMode: TLlamaLazyMode;                 // On-demand reading of tensors marked by the arch (+28)
+    MainGpu: Int32;                           // GPU used for the entire model in LLAMA_SPLIT_MODE_NONE (+32)
     // implicit 4-byte padding for pointer alignment
-    TensorSplit: PTensorSplit;                // Proportions of model offloaded to each GPU (+32)
-    ProgressCallback: TLlamaProgressCallback; // Progress callback; return false to abort (+40)
-    ProgressCallbackUserData: Pointer;        // Context pointer for the callback (+48)
-    KVOverrides: PTLlamaModelKVOverrideArray; // Key-value metadata overrides (+56)
-    VocabOnly: Boolean;                       // Load only the vocabulary, no weights (+64)
-    UseMMap: Boolean;                         // Use memory mapping if possible (+65)
-    UseDirectIo: Boolean;                     // Use direct I/O, takes precedence over use_mmap (+66)
-    UseMLock: Boolean;                        // Force system to keep the model in RAM (+67)
-    CheckTensors: Boolean;                    // Validate model tensor data (+68)
-    UseExtraBufts: Boolean;                   // Use extra buffer types for weight repacking (+69)
-    NoHost: Boolean;                          // Bypass host buffer (+70)
-    NoAlloc: Boolean;                         // Only load metadata, simulate allocations (+71)
+    TensorSplit: PTensorSplit;                // Proportions of model offloaded to each GPU (+40)
+    ProgressCallback: TLlamaProgressCallback; // Progress callback; return false to abort (+48)
+    ProgressCallbackUserData: Pointer;        // Context pointer for the callback (+56)
+    KVOverrides: PTLlamaModelKVOverrideArray; // Key-value metadata overrides (+64)
+    VocabOnly: Boolean;                       // Load only the vocabulary, no weights (+72)
+    CheckTensors: Boolean;                    // Validate model tensor data (+73)
+    UseExtraBufts: Boolean;                   // Use extra buffer types for weight repacking (+74)
+    NoHost: Boolean;                          // Bypass host buffer (+75)
+    NoAlloc: Boolean;                         // Only load metadata, simulate allocations (+76)
+    LoadMtp: Boolean;                         // Load MTP layers (+77)
+    // implicit 2-byte padding to 80
   end;
 
+  // struct llama_context_params (b11900), 168 bytes
   TLlamaContextParams = record
     NContext: UInt32;               // text context, 0 = from model (+0)
     NBatch: UInt32;                 // logical max batch size for llama_decode (+4)
     NUBatch: UInt32;                // physical max batch size (+8)
     NSeqMax: UInt32;                // max sequences for recurrent models (+12)
-    NThreads: Int32;                // threads for generation (+16)
-    NThreadsBatch: Int32;           // threads for batch processing (+20)
+    NRsSeq: UInt32;                 // recurrent-state snapshots per seq, 0 = no rollback [EXPERIMENTAL] (+16)
+    NOutputsMax: UInt32;            // max outputs in a ubatch, 0 = n_batch (+20)
+    NOutputsMaxPerSeq: UInt32;      // max outputs per sequence, 0 = n_outputs_max (+24)
+    NThreads: Int32;                // threads for generation (+28)
+    NThreadsBatch: Int32;           // threads for batch processing (+32)
 
-    RopeScalingType: TLlamaRopeScalingType; // RoPE scaling type (+24)
-    PoolingType: TLlamaPoolingType;         // pooling type for embeddings (+28)
-    AttentionType: TLlamaAttentionType;     // attention type for embeddings (+32)
-    FlashAttnType: TLlamaFlashAttnType;     // when to enable Flash Attention (+36)
+    CtxType: TLlamaContextType;             // context type, e.g. MTP (+36)
+    RopeScalingType: TLlamaRopeScalingType; // RoPE scaling type (+40)
+    PoolingType: TLlamaPoolingType;         // pooling type for embeddings (+44)
+    AttentionType: TLlamaAttentionType;     // attention type for embeddings (+48)
+    FlashAttnType: TLlamaFlashAttnType;     // when to enable Flash Attention (+52)
 
-    RopeFreqBase: Single;           // RoPE base frequency, 0 = from model (+40)
-    RopeFreqScale: Single;          // RoPE frequency scaling factor, 0 = from model (+44)
-    YarnExtFactor: Single;          // YaRN extrapolation mix factor (+48)
-    YarnAttnFactor: Single;         // YaRN magnitude scaling factor (+52)
-    YarnBetaFast: Single;           // YaRN low correction dim (+56)
-    YarnBetaSlow: Single;           // YaRN high correction dim (+60)
-    YarnOrigCtx: UInt32;            // YaRN original context size (+64)
-    DefragThreshold: Single;        // KV cache defrag threshold, <= 0 disabled [DEPRECATED] (+68)
+    RopeFreqBase: Single;           // RoPE base frequency, 0 = from model (+56)
+    RopeFreqScale: Single;          // RoPE frequency scaling factor, 0 = from model (+60)
+    YarnExtFactor: Single;          // YaRN extrapolation mix factor (+64)
+    YarnAttnFactor: Single;         // YaRN magnitude scaling factor (+68)
+    YarnBetaFast: Single;           // YaRN low correction dim (+72)
+    YarnBetaSlow: Single;           // YaRN high correction dim (+76)
+    YarnOrigCtx: UInt32;            // YaRN original context size (+80)
+    DefragThreshold: Single;        // KV cache defrag threshold, <= 0 disabled [DEPRECATED] (+84)
 
-    EvalCallback: TGgmlBackendSchedEvalCallback; // evaluation callback (+72)
-    EvalCallbackUserData: Pointer;               // context for eval callback (+80)
+    EvalCallback: TGgmlBackendSchedEvalCallback; // evaluation callback (+88)
+    EvalCallbackUserData: Pointer;               // context for eval callback (+96)
 
-    TypeK: TGgmlType;               // data type for K cache [EXPERIMENTAL] (+88)
-    TypeV: TGgmlType;               // data type for V cache [EXPERIMENTAL] (+92)
+    TypeK: TGgmlType;               // data type for K cache [EXPERIMENTAL] (+104)
+    TypeV: TGgmlType;               // data type for V cache [EXPERIMENTAL] (+108)
 
-    AbortCallback: TGgmlAbortCallback; // abort callback; return true to abort llama_decode (+96)
-    AbortCallbackData: Pointer;        // context for abort callback (+104)
+    MoeCacheSize: NativeUInt;       // device cache for host-side experts, 0 = disabled [EXPERIMENTAL] (+112)
+
+    AbortCallback: TGgmlAbortCallback; // abort callback; return true to abort llama_decode (+120)
+    AbortCallbackData: Pointer;        // context for abort callback (+128)
 
     // Booleans at the end to avoid misalignment during copy-by-value
-    Embeddings: Boolean;            // extract embeddings together with logits (+112)
-    OffloadKQV: Boolean;            // offload KQV ops (including KV cache) to GPU (+113)
-    NoPerformance: Boolean;         // disable performance measurements (+114)
-    OpOffload: Boolean;             // offload host tensor operations to device (+115)
-    SwaFull: Boolean;               // use full-size SWA cache (+116)
-    KvUnified: Boolean;             // use unified buffer across input sequences (+117)
+    Embeddings: Boolean;            // extract embeddings (+136)
+    OffloadKQV: Boolean;            // offload KQV ops (including KV cache) to GPU (+137)
+    NoPerformance: Boolean;         // disable performance measurements (+138)
+    OpOffload: Boolean;             // offload host tensor operations to device (+139)
+    SwaFull: Boolean;               // use full-size SWA cache (+140)
+    KvUnified: Boolean;             // use unified buffer across input sequences (+141)
     // implicit 2-byte padding for pointer alignment
-    Samplers: Pointer;              // backend sampler chain config [EXPERIMENTAL] (+120)
-    NSamplers: NativeUInt;          // number of sampler chain configs (+128)
+    Samplers: Pointer;              // backend sampler chain config [EXPERIMENTAL] (+144)
+    NSamplers: NativeUInt;          // number of sampler chain configs (+152)
+    CtxOther: Pointer;              // other context, e.g. the target of an MTP context (+160)
   end;
 
   TLlamaLogCallback = procedure(const ALevel: TGgmlLogLevel;
     const AText: PAnsiChar; const AUserData: Pointer); cdecl;
 
+  // struct llama_model_quantize_params (b11900), 64 bytes
   PLlamaModelQuantizeParams = ^TLlamaModelQuantizeParams;
   TLlamaModelQuantizeParams = record
-    nthread: Int32;                      // Number of threads to use for quantizing
-    ftype: TllamaFtype;                  // Quantize to this llama_ftype
-    output_tensor_type: TGgmlType;       // Output tensor type
-    token_embedding_type: TGgmlType;     // Token embeddings tensor type
-    allow_requantize: Boolean;           // Allow quantizing non-f32/f16 tensors
-    quantize_output_tensor: Boolean;     // Quantize output.weight
-    only_copy: Boolean;                  // Only copy tensors, ignoring other settings
-    pure: Boolean;                       // Quantize all tensors to the default type
-    keep_split: Boolean;                 // Quantize to the same number of shards
-    imatrix: Pointer;                    // Pointer to importance matrix data
-    kv_overrides: Pointer;               // Pointer to vector containing overrides
+    nthread: Int32;                      // Number of threads to use for quantizing (+0)
+    ftype: TllamaFtype;                  // Quantize to this llama_ftype (+4)
+    output_tensor_type: TGgmlType;       // Output tensor type (+8)
+    token_embedding_type: TGgmlType;     // Token embeddings tensor type (+12)
+    allow_requantize: Boolean;           // Allow quantizing non-f32/f16 tensors (+16)
+    quantize_output_tensor: Boolean;     // Quantize output.weight (+17)
+    only_copy: Boolean;                  // Only copy tensors, ignoring other settings (+18)
+    pure: Boolean;                       // Quantize all tensors to the default type (+19)
+    keep_split: Boolean;                 // Quantize to the same number of shards (+20)
+    dry_run: Boolean;                    // Calculate and show the final size, write nothing (+21)
+    imatrix: Pointer;                    // Pointer to importance matrix data (+24)
+    kv_overrides: Pointer;               // Pointer to array of overrides, NULL-terminated (+32)
+    tt_overrides: Pointer;               // Pointer to array of tensor type overrides (+40)
+    prune_layers: Pointer;               // Pointer to array of layer indices to prune, -1-terminated (+48)
+    max_buf_size: NativeUInt;            // Max bytes of tensor rows in memory at once, 0 = 8 GiB (+56)
   end;
 
   PLlamaLogitBias = ^TLlamaLogitBias;
@@ -398,12 +443,18 @@ type
   TLLamaSamplerReset = procedure(ASmpl: PLlamaSampler); cdecl;
   TLLamaSamplerClone = function(const ASmpl: PLlamaSampler): PLlamaSampler; cdecl;
   TLLamaSamplerFree = procedure(ASmpl: PLlamaSampler); cdecl;
-  // EXPERIMENTAL: GPU-side sampling (b9050) — always nil in custom samplers
-  TLLamaSamplerBackendInit = function(ASmpl: PLlamaSampler; ABuft: Pointer): Boolean; cdecl;
-  TLLamaSamplerBackendAccept = procedure(ASmpl: PLlamaSampler; ABuft: Pointer); cdecl;
-  TLLamaSamplerBackendApply = procedure(ASmpl: PLlamaSampler; ALogits: Pointer); cdecl;
-  TLLamaSamplerBackendSetInput = procedure(ASmpl: PLlamaSampler; AInput: Pointer); cdecl;
+  // EXPERIMENTAL: GPU-side sampling — always nil in custom samplers
+  TLLamaSamplerBackendInit = function(ASmpl: PLlamaSampler; ABuft: Pointer;
+    ANOutputsMaxPerSeq: UInt32): Boolean; cdecl;
+  TLLamaSamplerBackendAccept = procedure(ASmpl: PLlamaSampler; ACtx: Pointer;
+    AGraph: Pointer; ASelectedToken: Pointer); cdecl;
+  TLLamaSamplerBackendApply = procedure(ASmpl: PLlamaSampler; ACtx: Pointer;
+    AGraph: Pointer; AData: Pointer); cdecl;
+  TLLamaSamplerBackendSetInput = procedure(ASmpl: PLlamaSampler); cdecl;
+  TLLamaSamplerBackendReset = procedure(ASmpl: PLlamaSampler); cdecl;
+  TLLamaSamplerCopyState = procedure(const ASrc: PLlamaSampler; ADst: PLlamaSampler); cdecl;
 
+  // struct llama_sampler_i (b11900)
   PLlamaSamplerI = ^TLlamaSamplerI;
   TLlamaSamplerI = record
     Name: TLLamaSamplerName;               // Can be NULL
@@ -416,6 +467,8 @@ type
     BackendAccept: TLLamaSamplerBackendAccept;     // EXPERIMENTAL, can be NULL
     BackendApply: TLLamaSamplerBackendApply;       // EXPERIMENTAL, can be NULL
     BackendSetInput: TLLamaSamplerBackendSetInput; // EXPERIMENTAL, can be NULL
+    BackendReset: TLLamaSamplerBackendReset;       // EXPERIMENTAL, can be NULL
+    CopyState: TLLamaSamplerCopyState;             // Can be NULL
   end;
 
   TLlamaSampler = record
@@ -423,6 +476,7 @@ type
     Ctx: TLlamaSamplerContext;      // Defined as Pointer for llama_sampler_context_t
   end;
 
+  // struct llama_perf_context_data (b11900), 56 bytes
   TLLamaPerfContextData = record
     t_start_ms: Double;
     t_load_ms: Double;
@@ -430,6 +484,9 @@ type
     t_eval_ms: Double;
     n_p_eval: Int32;
     n_eval: Int32;
+    n_reused: Int32;        // number of times a ggml compute graph had been reused
+    n_reallocs_same: Int32; // graph reallocations with an unchanged graph size
+    n_reallocs_diff: Int32; // graph reallocations with a changed graph size
   end;
 
   TLLamaPerfSamplerData = record

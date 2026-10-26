@@ -442,10 +442,7 @@ begin
     memChat.Lines[LLast] := memChat.Lines[LLast] + LParts[0];
 
     for I := 1 to High(LParts) do
-    begin
       memChat.Lines.Add(LParts[I]);
-      Inc(LLast);
-    end;
   finally
     memChat.Lines.EndUpdate;
   end;
@@ -611,7 +608,8 @@ begin
     end;
   end;
 
-  if ALevel < GGML_LOG_LEVEL_WARN then
+  // CONT carries progress dots during model load, not warnings
+  if (ALevel < GGML_LOG_LEVEL_WARN) or (ALevel = GGML_LOG_LEVEL_CONT) then
     Exit;
   TThread.Queue(nil, procedure
   begin

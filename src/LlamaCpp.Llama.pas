@@ -429,6 +429,7 @@ var
   LItem: TPair<string, string>;
   LTemplateChoice: TPair<string, string>;
   LStopStrings: TArray<string>;
+  LUseMMap: Boolean;
 begin
   FModelPath := AModelPath;
   FSettings.Assign(ASettings);
@@ -465,12 +466,18 @@ begin
   end;
 
   FModelParams.VocabOnly := FSettings.VocabOnly;
-  FModelParams.UseMMap := FSettings.UseMMap;
 
-  if not FSettings.LoraPath.IsEmpty() then
-    FModelParams.UseMMap := false;
-
-  FModelParams.UseMLock := FSettings.UseMLock;
+  // b11900 replaced use_mmap/use_mlock by load_mode; LoRA adapters need
+  // the weights in memory, so they disable mmap as before.
+  LUseMMap := FSettings.UseMMap and FSettings.LoraPath.IsEmpty();
+  if LUseMMap and FSettings.UseMLock then
+    FModelParams.LoadMode := TLlamaLoadMode.LLAMA_LOAD_MODE_MMAP_MLOCK
+  else if LUseMMap then
+    FModelParams.LoadMode := TLlamaLoadMode.LLAMA_LOAD_MODE_MMAP
+  else if FSettings.UseMLock then
+    FModelParams.LoadMode := TLlamaLoadMode.LLAMA_LOAD_MODE_MLOCK
+  else
+    FModelParams.LoadMode := TLlamaLoadMode.LLAMA_LOAD_MODE_NONE;
 
   if Assigned(FSettings.KVOverrides) then
     ParseKVOverrides();

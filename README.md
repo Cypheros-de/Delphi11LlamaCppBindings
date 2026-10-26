@@ -1,9 +1,9 @@
-# llama-cpp-delphi — Updated for llama.cpp b9090 · Delphi 11+
+# llama-cpp-delphi — Updated for llama.cpp b11900 · Delphi 11+
 
 > **Based on the original work by Lucas Moura Belo (lmbelo) for Embarcadero:**
 > [github.com/Embarcadero/llama-cpp-delphi](https://github.com/Embarcadero/llama-cpp-delphi)
 > 
-> This fork updates the Delphi bindings from the original llama.cpp build b3 (January 2025) to the current build **b9090 (May 2026)** and extends compatibility down to **Delphi 11 Alexandria**. 
+> This fork updates the Delphi bindings from the original llama.cpp build b3 (January 2025) to build **b11900 (October 2026)** and extends compatibility down to **Delphi 11 Alexandria**. 
 
 ---
 
@@ -18,18 +18,22 @@ To use AI at a practical speed, accelerators such as GPUs and TPUs are required.
 The CUDA 13 build of llama.cpp for RTX graphics cards belongs in `lib\win_x64_cuda_13`.
 Download the ZIP from the llama.cpp release page and extract its contents into that directory:
 
-**[llama-b9090-bin-win-cuda-13.1-x64.zip](https://github.com/ggml-org/llama.cpp/releases/download/b9090/llama-b9090-bin-win-cuda-13.1-x64.zip)**
+**[llama-b11900-bin-win-cuda-13.4-x64.zip](https://github.com/ggml-org/llama.cpp/releases/download/b11900/llama-b11900-bin-win-cuda-13.4-x64.zip)**
+
+The b11900 ZIP no longer contains the Visual C++ runtime. If it is not installed system-wide,
+copy `msvcp140.dll`, `msvcp140_codecvt_ids.dll`, `vcruntime140.dll` and `vcruntime140_1.dll`
+(14.50 or newer) into the same directory.
 
 If CUDA is not installed or not supported, the samples fall back to the CPU automatically.
 For a different GPU or CUDA version, replace the files in `lib\win_x64_cuda_13` with the
-matching build from the [llama.cpp release page](https://github.com/ggml-org/llama.cpp/releases/tag/b9090),
+matching build from the [llama.cpp release page](https://github.com/ggml-org/llama.cpp/releases/tag/b11900),
 or create a new folder and adjust the DLL path in the sample's `initialization` section.
 
 ---
 
 ## Highlights
 
-- **llama.cpp b9090** — fully updated API, including the new backend loader, vocab object, memory API, and sampler chain.
+- **llama.cpp b11900** — fully updated API, including the new backend loader, vocab object, memory API, and sampler chain.
 - **Delphi 11+ (Alexandria and newer)** — tested on Delphi 11; compatible with Delphi 12 and 13 via the same package set (`packages/d11+/`).
 - **CUDA 13: RTX 30xx/40xx/50xx ready** — backend DLL loading via `ggml_backend_load_all_from_path`,
   Flash Attention support, quantized KV cache (Q8_0).
@@ -84,6 +88,46 @@ parameters, memory usage, and throughput, in-process bindings are the cleaner
 and more efficient choice.
 
 ---
+
+## What changed from b9090 to b11900
+
+Needed e.g. for ModernBERT embedding models such as granite-embedding-97m-multilingual-r2
+(new pre-tokenizer and SiLU feed-forward, llama.cpp PR #22716). No bound function was
+removed; the changes are struct layouts, two sampler signatures and one mtmd helper signature.
+
+- **`TLlamaModelParams`**: `UseMMap`, `UseDirectIo` and `UseMLock` were replaced by
+  `LoadMode: TLlamaLoadMode` (AUTO/NONE/MMAP/MLOCK/MMAP_MLOCK/DIRECT_IO); new `LazyMode`
+  and `LoadMtp`. `TLlamaSettings.UseMMap/UseMLock` still exist and are mapped onto `LoadMode`.
+- **`TLlamaContextParams`**: new `NRsSeq`, `NOutputsMax`, `NOutputsMaxPerSeq` (default 1 —
+  raise it if several tokens per sequence are marked as output), `CtxType`, `MoeCacheSize`
+  and `CtxOther`.
+- **`TLlamaModelQuantizeParams`** and **`TLLamaPerfContextData`** were already too small for
+  b9090 (missing `dry_run`, `tt_overrides`, `prune_layers` resp. `n_reused`); since both are
+  returned by value, the DLL wrote past the Delphi record. Both now match b11900
+  (+`max_buf_size`, +`n_reallocs_same/diff`).
+- **`TLlamaSamplerI`**: `BackendInit` gets `n_outputs_max_per_seq`, the backend callbacks
+  have their real signatures, new `BackendReset` and `CopyState`.
+- **Samplers**: `llama_sampler_init_penalties` takes `n_vocab` first and rejects
+  `penalty_last_n = -1` (the bindings map negative values to 0 = disabled);
+  `TLlamaSampler.AddPenalties` has a new first parameter `NVocab`.
+  `llama_sampler_init_dry` lost `n_ctx_train`.
+- **mtmd**: `TMtmdContextParams` +`Device`, `BatchMaxTokens`, progress callback;
+  `TMtmdInputText` +`TextLen` (length of `Text` in bytes, must be set).
+- **mtmd helper**: `mtmd_helper_bitmap_init_from_file(ctx, fname, placeholder, opt)` now takes
+  `APlaceholder` and a `TMtmdHelperInitOpt` (from the new `mtmd_helper_init_opt_default`) and
+  returns a `TMtmdHelperBitmapWrapper` record (`Bitmap`, `VideoCtx`) instead of a bitmap
+  pointer. With the old declaration the DLL took the context pointer as its hidden result
+  address and overwrote the mtmd context. Free a non-nil `VideoCtx` with the new
+  `mtmd_helper_video_free`. `TLlamaCppApis.VisionAvailable` now also requires
+  `mtmd_helper_init_opt_default`, and `Warnings` reports an mtmd.dll that predates the new
+  signature.
+- **Jinja2 chat formatter (bug fix)**: template, roles and message contents were converted
+  through the ANSI code page (`AnsiString`) instead of UTF-8. Western European text survived the
+  round trip, but Cyrillic, CJK or emoji reached the model as `?`. Now uses `UTF8String` /
+  `UTF8ToString`.
+- **Enums**: `TLlamaVocabType` (+PLAMO2, TEST, PLAMO3), `TLlamaFType` (+MXFP4_MOE, NVFP4,
+  Q1_0, Q2_0), new `TLlamaLoadMode`, `TLlamaLazyMode`, `TLlamaContextType`.
+- **New binding**: `llama_version`.
 
 ## What changed from b3 to b9090
 
@@ -233,7 +277,7 @@ samples/
   SimpleChatWithDownload/    FMX sample with HuggingFace model download
 test/            DUnit test suite
 lib/
-  win_x64_cuda_13/    DLLs for CUDA 13 — extract llama-b9090-bin-win-cuda-13.1-x64.zip here
+  win_x64_cuda_13/    DLLs for CUDA 13 — extract llama-b11900-bin-win-cuda-13.4-x64.zip here
 ```
 
 ### Package installation (Delphi 11+)
@@ -246,14 +290,18 @@ Delphi 12/13 will offer to migrate the project format on first open — accept.
 
 ### DLL setup (CUDA 13)
 
-1. Download **[llama-b9090-bin-win-cuda-13.1-x64.zip](https://github.com/ggml-org/llama.cpp/releases/download/b9090/llama-b9090-bin-win-cuda-13.1-x64.zip)** from the llama.cpp releases.
+1. Download **[llama-b11900-bin-win-cuda-13.4-x64.zip](https://github.com/ggml-org/llama.cpp/releases/download/b11900/llama-b11900-bin-win-cuda-13.4-x64.zip)** from the llama.cpp releases.
 2. Extract the ZIP contents directly into `lib/win_x64_cuda_13/`.
-   The directory must contain at least `ggml.dll`, `ggml-base.dll`, `ggml-cpu.dll`, `llama.dll`,
-   and `ggml-cuda.dll` (plus the CUDA runtime DLLs shipped in the ZIP).
-3. For vision support, `mtmd.dll` must also be present — it is included in the same ZIP.
+   The directory must contain at least `ggml.dll`, `ggml-base.dll`, the `ggml-cpu-*.dll` files,
+   `llama.dll` and `ggml-cuda.dll`. The CUDA runtime is a separate download
+   (`cudart-llama-bin-win-cuda-13.4-x64.zip`); without it the CPU backend is used.
+3. The ZIP no longer contains the Visual C++ runtime. If it is not installed system-wide, copy
+   `msvcp140.dll`, `msvcp140_codecvt_ids.dll`, `vcruntime140.dll` and `vcruntime140_1.dll`
+   (14.50 or newer) into the same directory.
+4. For vision support, `mtmd.dll` must also be present — it is included in the same ZIP.
 
 > For a different GPU or CUDA version, use the matching build from the
-> [llama.cpp release page](https://github.com/ggml-org/llama.cpp/releases/tag/b9090)
+> [llama.cpp release page](https://github.com/ggml-org/llama.cpp/releases/tag/b11900)
 > and adjust the DLL path in the sample's `initialization` section accordingly.
 
 ---
@@ -321,7 +369,7 @@ questions about it.
 | --------------- | --------------------------------------------------------- |
 | `*.gguf`        | The text model (same as for chat)                         |
 | `mmproj-*.gguf` | The matching multimodal projector file                    |
-| `mtmd.dll`      | Ships with llama.cpp b9050+; must be in the DLL directory |
+| `mtmd.dll`      | Ships with llama.cpp b11900; must be in the DLL directory |
 
 The text model and the mmproj file must come from the same model release —
 mixing them from different versions will cause `mtmd_init_from_file` to fail.
@@ -334,23 +382,30 @@ mixing them from different versions will cause `mtmd_init_from_file` to fail.
 | LLaVA-1.5-7B           | `mmproj-llava-1.5-7b.gguf`       | Widely available reference model |
 | Gemma3-12B             | `mmproj-gemma3-12b.gguf`         | High quality, needs ~12 GB VRAM  |
 | MiniCPM-V-2.6          | `mmproj-minicpm-v2_6.gguf`       | Compact, good for limited VRAM   |
+| SmolVLM-500M-Instruct  | `mmproj-SmolVLM-500M-Instruct-Q8_0.gguf` | Tiny (~0.6 GB), verified with b11900 |
 
 ### How it works
 
-The sample uses the `mtmd` API introduced in llama.cpp b9050:
+The sample uses the `mtmd` API (llama.cpp b9050+, helper signatures of b11900):
 
 1. The text model is loaded via the standard `TLlama` component.
 2. `mtmd_init_from_file` creates a multimodal context from the mmproj file and
    the loaded text model (`Llama1.LlamaModel`).
 3. For each user turn with an image:
-   - The image is decoded into a raw RGB bitmap via `mtmd_helper_bitmap_init_from_file`.
-   - The prompt (system + `<__media__>` marker + question) and the bitmap are
-     tokenized together with `mtmd_tokenize`.
+   - The image is decoded into a raw RGB bitmap via `mtmd_helper_bitmap_init_from_file`
+     (returns a `TMtmdHelperBitmapWrapper`; the bitmap is in its `Bitmap` field).
+   - The prompt is built with the model's built-in chat template
+     (`llama_model_chat_template` + `llama_chat_apply_template`): the system prompt and
+     a user message containing the `<__media__>` marker plus the question. Models without
+     a supported template fall back to a plain `USER:`/`ASSISTANT:` layout.
+   - Prompt and bitmap are tokenized together with `mtmd_tokenize`.
    - All chunks (text tokens and image embeddings) are written into the KV cache
      via `mtmd_helper_eval_chunks`.
    - Token generation then proceeds through the standard `TLlama.Generate` call,
      with `AReset = False` so the KV cache populated by mtmd is preserved.
-4. Text-only turns (no image selected) go through the normal `Eval` + `Generate` path.
+     Generation stops at any end-of-generation token (`llama_vocab_is_eog`).
+4. Text-only turns (no image selected) use the same template and go through the normal
+   `Eval` + `Generate` path.
 
 ### Settings
 

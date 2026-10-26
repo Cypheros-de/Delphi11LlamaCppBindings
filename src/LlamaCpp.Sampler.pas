@@ -94,7 +94,7 @@ begin
         end;
       end);
 
-  ASampler.AddPenalties(
+  ASampler.AddPenalties(FModel.NVocab,
     FSettings.LastNTokensSize,
     ASettings.RepeatPenalty, ASettings.FrequencyPenalty,
     ASettings.PresencePenalty);

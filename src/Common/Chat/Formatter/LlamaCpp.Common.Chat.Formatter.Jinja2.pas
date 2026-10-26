@@ -14,7 +14,9 @@ uses
 type
   TJinja2ChatFormatter = class(TInterfacedObject, ILlamaChatFormater)
   private
-    FTemplate: AnsiString;
+    // llama_chat_apply_template expects and returns UTF-8; AnsiString would
+    // convert through the ANSI code page and lose e.g. Cyrillic or CJK text.
+    FTemplate: UTF8String;
     FStopStrings: TArray<string>;
     FAddGenerationPrompt: boolean;
     function Format(const ASettings: TLlamaChatCompletionSettings)
@@ -61,7 +63,7 @@ var
   I: Integer;
   LFound: Boolean;
 begin
-  FTemplate            := AnsiString(ATemplate);
+  FTemplate            := UTF8String(ATemplate);
   FStopStrings         := AStopStrings;
   FAddGenerationPrompt := AAddGenerationPrompt;
 
@@ -92,7 +94,7 @@ begin
     TLlamaApi.Instance.llama_chat_apply_template(
       LTmpl, @LProbeMsgs[0], 2, False, @LBuf[0], LBufSize);
 
-    LFullText := string(AnsiString(PAnsiChar(@LBuf[0])));
+    LFullText := UTF8ToString(PAnsiChar(@LBuf[0]));
     LProbeStr := string(CProbeMarker);
     LProbePos := Pos(LProbeStr, LFullText);
 
@@ -125,8 +127,8 @@ function TJinja2ChatFormatter.Format(
   const ASettings: TLlamaChatCompletionSettings): TChatFormatterResponse;
 var
   LMessages: TArray<TChatCompletionRequestMessage>;
-  LRoles: TArray<AnsiString>;
-  LContents: TArray<AnsiString>;
+  LRoles: TArray<UTF8String>;
+  LContents: TArray<UTF8String>;
   LChatMsgs: TArray<TLlamaChatMessage>;
   LMsg: TChatCompletionRequestMessage;
   LCount: NativeUInt;
@@ -146,8 +148,8 @@ begin
   for I := 0 to Integer(LCount) - 1 do
   begin
     LMsg         := LMessages[I];
-    LRoles[I]    := AnsiString(LMsg.Role);
-    LContents[I] := AnsiString(VarToStr(LMsg.Content));
+    LRoles[I]    := UTF8String(LMsg.Role);
+    LContents[I] := UTF8String(VarToStr(LMsg.Content));
     LChatMsgs[I].Role    := PAnsiChar(LRoles[I]);
     LChatMsgs[I].Content := PAnsiChar(LContents[I]);
   end;
@@ -174,7 +176,7 @@ begin
     LTmpl, @LChatMsgs[0], LCount, FAddGenerationPrompt,
     @LBuf[0], LBufSize);
 
-  LPrompt := string(AnsiString(PAnsiChar(@LBuf[0])));
+  LPrompt := UTF8ToString(PAnsiChar(@LBuf[0]));
 
   Result := TChatFormatterResponse.Create(LPrompt);
   Result.AddedSpecial := True;
